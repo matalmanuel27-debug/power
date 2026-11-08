@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POWER - Una aventura elemental</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:radial-gradient(ellipse at center,#1a0f3a 0%,#05030f 70%);overflow:hidden;font-family:'Segoe UI',Tahoma,sans-serif;color:#fff}
+body{display:flex;align-items:center;justify-content:center}
+#wrap{position:relative;width:960px;height:694px;flex:none}
+canvas{display:block;border-radius:14px;box-shadow:0 0 60px rgba(120,60,255,.45),0 0 0 2px rgba(160,120,255,.35)}
+#ov{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,3,22,.86);border-radius:14px;text-align:center;padding:24px 60px;backdrop-filter:blur(3px)}
+#ov.show{display:flex;animation:fade .35s}
+@keyframes fade{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+h1.logo{font-size:130px;margin:0;letter-spacing:20px;font-weight:900;background:linear-gradient(90deg,#ff5a1f,#ffe53b,#9ff3ff,#2f8bff,#b8ffcf,#c48a4a,#ff5a1f);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 4s linear infinite;filter:drop-shadow(0 0 22px rgba(255,180,80,.5))}
+@keyframes shine{to{background-position:300% 0}}
+h2{font-size:34px;margin:6px 0 4px;color:#ffe08a;text-shadow:0 0 18px rgba(255,200,80,.6)}
+.tag{color:#b9a8ff;letter-spacing:3px;font-size:14px;text-transform:uppercase}
+p{font-size:18px;line-height:1.45;color:#e4dcff;max-width:760px;margin:8px auto}
+.btns{display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;justify-content:center}
+button{font-family:inherit;cursor:pointer;border:2px solid #7d5cff;background:linear-gradient(180deg,#3a2390,#1f1250);color:#fff;font-size:18px;font-weight:700;padding:14px 26px;border-radius:14px;transition:.15s;box-shadow:0 0 18px rgba(125,92,255,.35)}
+button:hover{transform:translateY(-3px) scale(1.03);box-shadow:0 0 30px rgba(160,120,255,.8);border-color:#c7b6ff}
+button.opt{width:250px;padding:14px;text-align:center}
+button.opt small{display:block;font-weight:400;font-size:14px;color:#cfc4ff;margin-top:6px;line-height:1.3}
+.box{background:rgba(255,255,255,.05);border:1px solid rgba(180,150,255,.25);border-radius:14px;padding:10px 20px;margin-top:10px}
+.mission{color:#9ff3ff;font-weight:700;font-size:18px}
+table.guide{border-collapse:collapse;font-size:15px;margin:4px auto;color:#e4dcff}
+table.guide td{padding:3px 12px;text-align:left}
+.keys{font-size:14px;color:#a99be0;margin-top:14px;line-height:2}
+kbd{background:#2a1d5c;border:1px solid #6a52c9;border-radius:5px;padding:1px 7px;font-family:inherit;color:#fff}
+ul.choices{list-style:none;padding:0;margin:4px 0;font-size:15px;color:#e4dcff;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas><div id="ov"></div></div>
+<script>
+'use strict';
+// ====================== CONFIGURACIÓN ======================
+const T=48, COLS=20, ROWS=13, HUD=70;
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+cv.width=COLS*T; cv.height=ROWS*T+HUD;
+const wrap=document.getElementById('wrap'), ov=document.getElementById('ov');
+function fit(){const s=Math.min(innerWidth/990,innerHeight/724);wrap.style.transform=`scale(${s})`;}
+addEventListener('resize',fit);fit();
+
+const FUEGO=0,AGUA=1,HIELO=2,VIENTO=3,RAYO=4,TIERRA=5;
+const POWERS=[
+ {name:'Fuego', icon:'🔥',color:'#ff5a1f',desc:'Derrite bloques de hielo y quema enredaderas. Vence a los Slimes de Hielo.'},
+ {name:'Agua',  icon:'💧',color:'#2f8bff',desc:'Apaga las llamas. Vence a los Slimes de Fuego.'},
+ {name:'Hielo', icon:'❄️',color:'#9ff3ff',desc:'Congela el agua y crea puentes para cruzar ríos.'},
+ {name:'Viento',icon:'🌪️',color:'#b8ffcf',desc:'Empuja rocas (¡a los agujeros!) y espanta fantasmas.'},
+ {name:'Rayo',  icon:'⚡',color:'#ffe53b',desc:'Activa generadores que abren puertas eléctricas. Vuela sobre el agua.'},
+ {name:'Tierra',icon:'⛰️',color:'#c48a4a',desc:'Rompe muros agrietados y rellena agujeros.'},
+];
+// Formas del jefe final y su debilidad
+const BE=[
+ {name:'Fuego',   color:'#ff5a1f',weak:AGUA},
+ {name:'Hielo',   color:'#9ff3ff',weak:FUEGO},
+ {name:'Agua',    color:'#2f8bff',weak:RAYO},
+ {name:'Tormenta',color:'#ffe53b',weak:TIERRA},
+];
+
+/* LEYENDA DE MAPAS
+ # muro   . suelo   S inicio   E portal   * estrella
+ W agua   I bloque de hielo   F llamas   V enredadera   C muro agrietado
+ H agujero   B roca   G generador   D puerta eléctrica
+ 1-6 píldoras (1 fuego,2 agua,3 hielo,4 viento,5 rayo,6 tierra)   a altar de decisión
+ r slime de fuego   b slime de hielo   g fantasma   K jefe */
+const LEVELS=[
+{name:'El Despertar',
+ story:'Despiertas en una cueva congelada. Una luz roja brilla a lo lejos... ¡es una píldora de poder!',
+ mission:'Consigue el poder del Fuego y recoge las 4 estrellas.',
+ hint:'Toca la píldora 🔥 y dispara con ESPACIO hacia donde miras. El fuego derrite el hielo y quema enredaderas.',
+ decision:{title:'El Sabio de la Montaña',text:'Antes de tu primera misión, un sabio anciano te ofrece un regalo. Solo puedes elegir uno:',
+  options:[{label:'❤️ Corazón Valiente',desc:'+1 corazón máximo',effect:{hearts:1}},
+           {label:'🔋 Mente Serena',desc:'Tu energía se recarga 30% más rápido',effect:{regen:.3}},
+           {label:'👟 Botas Veloces',desc:'Te mueves más rápido',effect:{speed:1}}]},
+ map:[
+ '####################',
+ '#S.....#...........#',
+ '#..1...#..*........#',
+ '#......I.......b...#',
+ '#......#...........#',
+ '###V####.......*...#',
+ '#......#####I#######',
+ '#..*...#...........#',
+ '#......V.......*...#',
+ '#......#...........#',
+ '#......#########...#',
+ '#..............#..E#',
+ '####################']},
+{name:'Río de Llamas',
+ story:'Un bosque arde junto a un río helado. Para cruzarlo necesitarás dos nuevos poderes.',
+ mission:'Consigue Agua y Hielo, y recoge las 4 estrellas.',
+ hint:'El agua apaga las llamas. El hielo congela el agua: ¡dispara al río para crear un puente!',
+ decision:{title:'El Niño Perdido',text:'Un niño llora en el camino: perdió a su gato cerca del río. Ayudarlo te costará tiempo... ¿Qué haces?',
+  options:[{label:'🤝 Ayudarlo',desc:'Encuentras al gato. El niño te regala un amuleto: +1 corazón y +200 puntos',effect:{hearts:1,score:200}},
+           {label:'🏃 Seguir tu misión',desc:'Llegas antes y entrenas: +3 de energía máxima',effect:{energy:3}}]},
+ map:[
+ '####################',
+ '#S...2.#.....#.....#',
+ '#......F.....F..*..#',
+ '#......#.....#.....#',
+ '#......#..*..#..r..#',
+ '#......#.....#######',
+ '###F####WWWWW#.....#',
+ '#......#WWWWW#..E..#',
+ '#..3...#WWWWW#.....#',
+ '#......#.....###.###',
+ '#..*.r.#.....F.....#',
+ '#......#.....#..*..#',
+ '####################']},
+{name:'Valle de los Vientos',
+ story:'Un valle lleno de agujeros sin fondo. Las rocas parecen estar ahí por una razón...',
+ mission:'Consigue el Viento y recoge las 3 estrellas.',
+ hint:'El viento empuja las rocas hasta que chocan. ¡Alinéalas con un agujero para rellenarlo! Si te atascas, pulsa R.',
+ decision:{title:'El Puente Viejo',text:'Para llegar al valle debes cruzar un puente que cruje con cada paso.',
+  options:[{label:'💨 Cruzar corriendo',desc:'Ganas agilidad: te mueves más rápido',effect:{speed:1}},
+           {label:'🛠️ Repararlo con calma',desc:'Encuentras cristales: +2 energía máxima y recarga +20%',effect:{energy:2,regen:.2}}]},
+ map:[
+ '####################',
+ '#S.4...#...........#',
+ '#......#....B......#',
+ '#...B..H........*..#',
+ '#......#..g........#',
+ '############H#######',
+ '#..................#',
+ '#..*............B..#',
+ '#..................#',
+ '################H###',
+ '#..................#',
+ '#..*.............E.#',
+ '####################']},
+{name:'La Fábrica de Tormentas',
+ story:'Una fábrica abandonada sin electricidad. Sus puertas solo se abren con energía pura.',
+ mission:'Consigue el Rayo, activa el generador y recoge las 3 estrellas.',
+ hint:'El rayo activa generadores 🔌 y abre TODAS las puertas eléctricas. ¡Puede viajar por encima del agua!',
+ decision:{title:'La Tormenta',text:'Una tormenta eléctrica se acerca a la fábrica. Los truenos retumban...',
+  options:[{label:'⛺ Refugiarte',desc:'Descansas bien: +1 corazón máximo',effect:{hearts:1}},
+           {label:'⚡ Enfrentarla',desc:'Absorbes su energía: recarga +40% y +300 puntos',effect:{regen:.4,score:300}}]},
+ map:[
+ '####################',
+ '#S.....#...........#',
+ '#..5...D....g......#',
+ '#......#...........#',
+ '#.WWWW.#.....*.....#',
+ '#.WGWW.###I#########',
+ '##########.#########',
+ '#..*...F...........#',
+ '#......#.......*...#',
+ '#......#...........#',
+ '#......#####D#######',
+ '#......#....E......#',
+ '####################']},
+{name:'Templo de la Tierra',
+ story:'Un templo antiguo con dos caminos. En el centro, un altar guarda un gran secreto.',
+ mission:'Toma una decisión en el altar y recoge las 3 estrellas.',
+ hint:'Hay más de un camino. Piensa bien qué poder usar en cada obstáculo.',
+ decision:{title:'El Guardián de la Puerta',text:'Un guardián de piedra bloquea la entrada y pregunta: "¿Qué es más importante?"',
+  options:[{label:'💪 El Poder',desc:'+3 de energía máxima',effect:{energy:3}},
+           {label:'📖 La Sabiduría',desc:'+500 puntos y recarga +20%',effect:{score:500,regen:.2}}]},
+ altar:{title:'El Altar de las Decisiones',text:'Dos píldoras brillan sobre el altar. Solo puedes tomar UNA. La otra desaparecerá para siempre.',
+  options:[{label:'⛰️ Píldora de Tierra',desc:'Nuevo poder: rompe muros agrietados y rellena agujeros. ¡Abre un atajo!',effect:{power:TIERRA}},
+           {label:'❤️ Píldora de Vida',desc:'+1 corazón y +3 energía máxima. Tendrás que usar el viento para avanzar.',effect:{hearts:1,energy:3}}]},
+ map:[
+ '####################',
+ '#S...a.#...........#',
+ '#......F.......B...#',
+ '#......#..*........#',
+ '#......#...r.......#',
+ '###C###########H####',
+ '#......#...........#',
+ '#..*...#.....g.....#',
+ '#......I.......*...#',
+ '#......#...........#',
+ '#......#####W#######',
+ '#......#####....E..#',
+ '####################']},
+{name:'El Guardián Elemental',
+ story:'El Guardián Elemental despierta. Cambia de forma constantemente: fuego, hielo, agua y tormenta.',
+ mission:'¡Derrota al Guardián Elemental!',
+ hint:'Mira su color y usa el poder opuesto: Fuego ➜ 💧 · Hielo ➜ 🔥 · Agua ➜ ⚡ · Tormenta ➜ ⛰️. El viento lo empuja. ¡Escóndete tras los pilares!',
+ decision:{title:'La Batalla Final',text:'El Guardián te espera al otro lado de la puerta. ¿Cómo te preparas?',
+  options:[{label:'🧘 Meditar',desc:'+2 corazones máximos',effect:{hearts:2}},
+           {label:'🗡️ Entrenar',desc:'Tus poderes hacen DOBLE daño al Guardián',effect:{bossDmg:1}}]},
+ map:[
+ '####################',
+ '#S.................#',
+ '#..................#',
+ '#...##........##...#',
+ '#...##........##...#',
+ '#..................#',
+ '#.........K........#',
+ '#..................#',
+ '#...##........##...#',
+ '#...##........##...#',
+ '#..................#',
+ '#.6................#',
+ '####################']},
+];
+
+// ====================== ESTADO ======================
+function newProg(){return{level:0,powers:[],cur:-1,maxHearts:3,maxEnergy:10,regen:1,speed:0,bossDmg:1,score:0,decided:{},choices:[]};}
+let prog=newProg(), snapshot=null;
+let state='title', time=0, curLevel=0, levelTime=0;
+let grid=null, items=[], enemies=[], boulders=[], projectiles=[], orbs=[], particles=[], texts=[];
+let boss=null, exitPos=null, starsTotal=0, starsGot=0, player=null, shake=0, banner=null, castCD=0, auraT=0, eid=0;
+
+function save(){try{localStorage.setItem('power_save',JSON.stringify(prog));}catch(e){}}
+function loadSave(){try{const s=localStorage.getItem('power_save');return s?JSON.parse(s):null;}catch(e){return null;}}
+
+// ====================== SONIDO ======================
+let actx=null, muted=false, nbuf=null;
+function ac(){if(!actx){actx=new (window.AudioContext||window.webkitAudioContext)();} if(actx.state==='suspended')actx.resume(); return actx;}
+function tone(f,d,type='sine',v=.1,f2=null,delay=0){
+ if(muted||!actx)return; const a=actx,t=a.currentTime+delay,o=a.createOscillator(),g=a.createGain();
+ o.type=type;o.frequency.setValueAtTime(f,t); if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+d);
+ g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);
+ o.connect(g).connect(a.destination);o.start(t);o.stop(t+d+.02);}
+function noise(d,v=.15,f=1000,type='lowpass',delay=0){
+ if(muted||!actx)return; const a=actx;
+ if(!nbuf){nbuf=a.createBuffer(1,a.sampleRate,a.sampleRate);const ch=nbuf.getChannelData(0);for(let i=0;i<ch.length;i++)ch[i]=Math.random()*2-1;}
+ const s=a.createBufferSource();s.buffer=nbuf;const fl=a.createBiquadFilter();fl.type=type;fl.frequency.value=f;
+ const g=a.createGain(),t=a.currentTime+delay;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);
+ s.connect(fl).connect(g).connect(a.destination);s.start(t);s.stop(t+d+.02);}
+const sfx={
+ cast(p){[()=>{noise(.3,.25,900);tone(220,.25,'sawtooth',.05,90);},
+  ()=>{tone(700,.22,'sine',.12,250);noise(.15,.08,2000,'bandpass');},
+  ()=>{tone(1400,.25,'triangle',.07,2600);tone(2100,.2,'sine',.04,3000,.05);},
+  ()=>{noise(.45,.22,1800,'bandpass');},
+  ()=>{tone(1500,.12,'square',.05,150);noise(.18,.15,5000,'highpass');},
+  ()=>{tone(140,.35,'sawtooth',.12,45);noise(.25,.15,400);}][p]();},
+ star(){tone(988,.1,'square',.05);tone(1319,.25,'square',.05,null,.08);},
+ power(){[523,659,784,1047,1319].forEach((f,i)=>tone(f,.3,'triangle',.08,null,i*.08));},
+ hurt(){tone(240,.35,'square',.09,60);noise(.2,.15,600);},
+ kill(){tone(600,.18,'square',.06,120);noise(.15,.1,1500);},
+ solve(){tone(440,.12,'triangle',.08);tone(660,.2,'triangle',.08,null,.1);},
+ nope(){tone(160,.15,'square',.05,120);},
+ door(){[300,400,600,800].forEach((f,i)=>tone(f,.2,'sawtooth',.05,null,i*.07));},
+ win(){[523,659,784,659,784,1047].forEach((f,i)=>tone(f,.3,'triangle',.08,null,i*.12));},
+ click(){tone(800,.06,'sine',.06);},
+ boss(){tone(90,.8,'sawtooth',.12,40);noise(.8,.2,300);},
+ shoot(){tone(330,.15,'sine',.05,180);},
+ drop(){tone(200,.3,'sine',.12,50);noise(.3,.15,300);},
+};
+// Música de fondo sencilla
+let mstep=0;
+setInterval(()=>{
+ if(muted||!actx||state!=='play')return;
+ const bass=[110,110,98,87.31,110,130.8,98,87.31][Math.floor(mstep/8)%8];
+ if(mstep%4===0)tone(bass,.6,'triangle',.05);
+ if(mstep%2===0){const sc=[440,523.3,587.3,659.3,784];tone(sc[(mstep*3+Math.floor(mstep/8))%5]*(mstep%16===0?2:1),.2,'sine',.022);}
+ mstep++;
+},170);
+
+// ====================== CARGA DE NIVEL ======================
+function loadLevel(i){
+ const L=LEVELS[i];
+ grid=[];items=[];enemies=[];boulders=[];projectiles=[];orbs=[];particles=[];texts=[];
+ boss=null;exitPos=null;starsTotal=0;starsGot=0;levelTime=0;castCD=0;
+ let sx=1,sy=1;
+ for(let y=0;y<ROWS;y++){
+  const row=[];
+  for(let x=0;x<COLS;x++){
+   const ch=(L.map[y]||'')[x]||'#'; let t='.';
+   if('#WIFVCHGD'.includes(ch))t=ch;
+   else if(ch==='S'){sx=x;sy=y;}
+   else if(ch==='E'){t='E';exitPos={x,y};}
+   else if(ch==='*'){items.push({x,y,type:'star'});starsTotal++;}
+   else if('123456'.includes(ch))items.push({x,y,type:'pill',p:+ch-1});
+   else if(ch==='a')items.push({x,y,type:'altar'});
+   else if(ch==='B')boulders.push({x,y,rx:x,ry:y});
+   else if('rbg'.includes(ch))enemies.push({type:ch,x,y,rx:x,ry:y,fx:x,fy:y,t:1,moving:false,timer:Math.random(),alive:true,flash:0,id:eid++});
+   else if(ch==='K')boss={x,y,hp:12,max:12,el:0,elT:7,shootT:2.5,flash:0,intro:2.5,kx:0,ky:0};
+   row.push(t);
+  }
+  grid.push(row);
+ }
+ let pw=prog.powers.includes(prog.cur)?prog.cur:(prog.powers.length?prog.powers[prog.powers.length-1]:-1);
+ player={x:sx,y:sy,rx:sx,ry:sy,fx:sx,fy:sy,t:0,moving:false,dir:[0,1],hearts:prog.maxHearts,energy:prog.maxEnergy,inv:0,power:pw};
+}
+
+// ====================== UTILIDADES ======================
+const WALK=new Set(['.','i','d','E']);
+const tc=x=>x*T+T/2, tcy=y=>y*T+T/2+HUD;
+function tileAt(x,y){return(y<0||y>=ROWS||x<0||x>=COLS)?'#':grid[y][x];}
+function boulderAt(x,y){return boulders.find(b=>b.x===x&&b.y===y);}
+function canWalk(x,y){return WALK.has(tileAt(x,y))&&!boulderAt(x,y);}
+function enemyCanWalk(x,y){const t=tileAt(x,y);return(t==='.'||t==='i'||t==='d')&&!boulderAt(x,y)&&!enemies.some(e=>e.alive&&e.x===x&&e.y===y);}
+function exitOpen(){return !!exitPos&&!boss&&starsGot>=starsTotal;}
+function burst(x,y,color,n=16,spd=160,life=.6,size=4,grav=0){
+ for(let i=0;i<n;i++){const a=Math.random()*6.283,s=spd*(.3+Math.random()*.7);
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:life*(.6+Math.random()*.6),max:life,color,size:size*(.5+Math.random()*.8),grav});}}
+function addText(str,tx,ty,color='#fff'){texts.push({str,x:tc(tx),y:tcy(ty)-20,color,life:1.3});}
+function showBanner(title,sub,color='#ffe08a',dur=3){banner={title,sub,color,life:dur,max:dur};}
+
+// ====================== JUGADOR ======================
+const DIRS={ArrowUp:[0,-1],KeyW:[0,-1],ArrowDown:[0,1],KeyS:[0,1],ArrowLeft:[-1,0],KeyA:[-1,0],ArrowRight:[1,0],KeyD:[1,0]};
+let dirStack=[];
+function updatePlayer(dt){
+ const p=player, spd=6.5*(1+prog.speed*.18);
+ if(p.moving){
+  p.t+=dt*spd;
+  if(p.t>=1){p.moving=false;p.rx=p.x;p.ry=p.y;onArrive();}
+  else{p.rx=p.fx+(p.x-p.fx)*p.t;p.ry=p.fy+(p.y-p.fy)*p.t;}
+ }
+ if(!p.moving&&state==='play'&&dirStack.length){
+  const d=DIRS[dirStack[dirStack.length-1]]; p.dir=d;
+  const nx=p.x+d[0],ny=p.y+d[1];
+  if(canWalk(nx,ny)){p.fx=p.x;p.fy=p.y;p.x=nx;p.y=ny;p.t=0;p.moving=true;}
+ }
+}
+function onArrive(){
+ const it=items.find(i=>i.x===player.x&&i.y===player.y);
+ if(it){
+  if(it.type==='star'){
+   items.splice(items.indexOf(it),1);starsGot++;prog.score+=100;sfx.star();
+   burst(tc(it.x),tcy(it.y),'#ffe066',24,200,.7,4);addText('+100 ⭐',it.x,it.y,'#ffe066');
+   if(starsGot===starsTotal&&exitPos){showBanner('¡PORTAL ABIERTO!','Ve al portal para completar la misión','#d59bff',2.5);sfx.door();}
+  }else if(it.type==='pill'){
+   items.splice(items.indexOf(it),1);givePower(it.p);
+  }else if(it.type==='altar'){
+   items.splice(items.indexOf(it),1);openAltar();
+  }
+ }
+ if(tileAt(player.x,player.y)==='E'&&exitOpen())levelComplete();
+}
+function givePower(p){
+ const P=POWERS[p];
+ if(!prog.powers.includes(p)){
+  prog.powers.push(p);prog.powers.sort();player.power=p;prog.cur=p;prog.score+=200;
+  showBanner(`¡PODER DE ${P.name.toUpperCase()}! ${P.icon}`,P.desc,P.color,3.5);sfx.power();
+  for(let k=0;k<3;k++)burst(tc(player.x),tcy(player.y),P.color,30,260+k*60,1,5);
+  shake=8;
+ }else{
+  prog.score+=250;player.energy=prog.maxEnergy;addText('+250 ¡Energía llena!',player.x,player.y,P.color);sfx.star();
+ }
+}
+function selectPower(p){if(prog.powers.includes(p)&&player.power!==p){player.power=p;prog.cur=p;sfx.click();burst(tc(player.rx),tcy(player.ry),POWERS[p].color,12,120,.4,3);}}
+function cyclePower(d){if(!prog.powers.length)return;let i=prog.powers.indexOf(player.power);i=(i+d+prog.powers.length)%prog.powers.length;selectPower(prog.powers[i]);}
+function cast(){
+ if(player.power<0){addText('¡Busca una píldora de poder!',player.x,player.y,'#ccc');sfx.nope();return;}
+ if(castCD>0)return;
+ if(player.energy<1){addText('Sin energía...',player.x,player.y,'#999');sfx.nope();castCD=.3;return;}
+ player.energy-=1;castCD=.22;
+ const x=Math.round(player.rx),y=Math.round(player.ry);
+ projectiles.push({x:player.rx,y:player.ry,dx:player.dir[0],dy:player.dir[1],p:player.power,tx:x,ty:y,life:0});
+ sfx.cast(player.power);
+}
+function hurt(){
+ if(player.inv>0||state!=='play')return;
+ player.hearts--;player.inv=1.3;shake=12;sfx.hurt();
+ burst(tc(player.rx),tcy(player.ry),'#ff3b5c',20,200,.6,4);
+ if(player.hearts<=0)gameOver();
+}
+
+// ====================== PODERES ======================
+function projEnter(pr,tx,ty){
+ const p=pr.p,t=tileAt(tx,ty);
+ const b=boulderAt(tx,ty);
+ if(b){
+  if(p===VIENTO&&!b.falling){pushBoulder(b,pr.dx,pr.dy);}
+  else addText('✖',tx,ty,'#aaa');
+  return true;
+ }
+ switch(t){
+  case '.':case 'i':case 'd':case 'E':return false;
+  case 'W':if(p===HIELO){grid[ty][tx]='i';solved(tx,ty,'#e6fdff','¡Congelado!');return true;}return false;
+  case 'H':if(p===TIERRA){grid[ty][tx]='.';solved(tx,ty,'#c48a4a','¡Relleno!');return true;}return false;
+  case 'I':if(p===FUEGO){grid[ty][tx]='.';solved(tx,ty,'#9ff3ff','¡Derretido!');}else nope(tx,ty);return true;
+  case 'V':if(p===FUEGO){grid[ty][tx]='.';solved(tx,ty,'#ff8a2a','¡Quemado!');}else nope(tx,ty);return true;
+  case 'F':if(p===AGUA){grid[ty][tx]='.';solved(tx,ty,'#cfe9ff','¡Apagado!');burst(tc(tx),tcy(ty),'#bbbbbb',20,60,1.2,6,-60);}else nope(tx,ty);return true;
+  case 'C':if(p===TIERRA){grid[ty][tx]='.';solved(tx,ty,'#c48a4a','¡Destruido!');shake=8;}else nope(tx,ty);return true;
+  case 'G':
+   if(p===RAYO){grid[ty][tx]='A';solved(tx,ty,'#ffe53b','¡Energía!');
+    for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)if(grid[y][x]==='D'){grid[y][x]='d';burst(tc(x),tcy(y),'#ffe53b',20,180,.6,3);}
+    showBanner('¡PUERTAS ABIERTAS!','El generador ha encendido la fábrica','#ffe53b',2);sfx.door();
+   }else nope(tx,ty);return true;
+  default:return true;
+ }
+}
+function solved(x,y,color,msg){burst(tc(x),tcy(y),color,30,220,.8,5);addText(msg,x,y,color);prog.score+=20;sfx.solve();}
+function nope(x,y){addText('✖ No funciona',x,y,'#bbb');sfx.nope();}
+function pushBoulder(b,dx,dy){
+ let x=b.x,y=b.y;
+ while(true){
+  const nx=x+dx,ny=y+dy,t=tileAt(nx,ny);
+  if(t==='H'){x=nx;y=ny;b.falling=true;break;}
+  if((t==='.'||t==='i'||t==='d')&&!boulderAt(nx,ny)&&!(player.x===nx&&player.y===ny)&&!items.some(i=>i.x===nx&&i.y===ny)){
+   x=nx;y=ny;const e=enemies.find(e=>e.alive&&e.x===nx&&e.y===ny);if(e)killEnemy(e,'¡Aplastado!');
+  }else break;
+ }
+ if(x===b.x&&y===b.y){addText('No se mueve',x,y,'#ccc');return;}
+ b.x=x;b.y=y;sfx.solve();
+}
+function updateBoulders(dt){
+ for(const b of boulders){
+  const sp=12*dt;
+  b.rx+=Math.max(-sp,Math.min(sp,b.x-b.rx));b.ry+=Math.max(-sp,Math.min(sp,b.y-b.ry));
+  if(Math.random()<.3&&(b.rx!==b.x||b.ry!==b.y))particles.push({x:tc(b.rx),y:tcy(b.ry)+14,vx:(Math.random()-.5)*40,vy:-20,life:.4,max:.4,color:'#8a7f72',size:3,grav:0});
+  if(b.falling&&b.rx===b.x&&b.ry===b.y){
+   b.fs=(b.fs===undefined?1:b.fs)-dt*3;
+   if(b.fs<=0){b.dead=true;grid[b.y][b.x]='.';burst(tc(b.x),tcy(b.y),'#a59a8c',30,160,.8,5);addText('¡Camino creado!',b.x,b.y,'#e8dcc8');sfx.drop();shake=6;prog.score+=20;}
+  }
+ }
+ boulders=boulders.filter(b=>!b.dead);
+}
+function updateProjectiles(dt){
+ for(const pr of projectiles){
+  const sp=14*dt;pr.x+=pr.dx*sp;pr.y+=pr.dy*sp;pr.life+=dt;
+  const col=POWERS[pr.p].color;
+  particles.push({x:tc(pr.x)+(Math.random()-.5)*10,y:tcy(pr.y)+(Math.random()-.5)*10,vx:-pr.dx*40,vy:-pr.dy*40+(pr.p===FUEGO?-40:0),life:.35,max:.35,color:col,size:4,grav:0});
+  for(const e of enemies){if(e.alive&&Math.hypot(e.rx-pr.x,e.ry-pr.y)<.55){hitEnemy(e,pr.p);pr.dead=true;break;}}
+  if(pr.dead){impact(pr);continue;}
+  for(const o of orbs){if(Math.hypot(o.x-pr.x,o.y-pr.y)<.55){o.dead=true;burst(tc(o.x),tcy(o.y),o.color,10,120,.4,3);}}
+  if(boss&&boss.intro<=0&&Math.hypot(boss.x-pr.x,boss.y-pr.y)<.9){hitBoss(pr);pr.dead=true;impact(pr);continue;}
+  const tx=Math.round(pr.x),ty=Math.round(pr.y);
+  if(tx!==pr.tx||ty!==pr.ty){pr.tx=tx;pr.ty=ty;if(projEnter(pr,tx,ty)){pr.dead=true;impact(pr);}}
+ }
+ projectiles=projectiles.filter(p=>!p.dead);
+}
+function impact(pr){
+ const x=tc(pr.x),y=tcy(pr.y),c=POWERS[pr.p].color;
+ const g=[-120,250,0,0,0,300][pr.p];
+ burst(x,y,c,18,170,.5,4,g);burst(x,y,'#ffffff',6,100,.3,2);
+}
+
+// ====================== ENEMIGOS ======================
+const WEAK={r:[AGUA],b:[FUEGO],g:[VIENTO,RAYO]};
+function hitEnemy(e,p){
+ if(WEAK[e.type].includes(p))killEnemy(e,'¡Vencido!');
+ else{e.flash=.3;addText('¡Inmune!',e.x,e.y,'#ffb3b3');sfx.nope();}
+}
+function killEnemy(e,msg){
+ e.alive=false;prog.score+=50;sfx.kill();
+ const c=e.type==='r'?'#ff6a3d':e.type==='b'?'#6fdcff':'#b98cff';
+ burst(tc(e.rx),tcy(e.ry),c,30,220,.7,5);addText(msg+' +50',e.x,e.y,c);
+}
+function updateEnemies(dt){
+ for(const e of enemies){
+  if(!e.alive)continue;
+  e.flash-=dt;
+  const spd=e.type==='g'?1.8:2.3;
+  if(e.moving){
+   e.t+=dt*spd;
+   if(e.t>=1){e.moving=false;e.rx=e.x;e.ry=e.y;}
+   else{e.rx=e.fx+(e.x-e.fx)*e.t;e.ry=e.fy+(e.y-e.fy)*e.t;}
+  }else{
+   e.timer-=dt;
+   if(e.timer<=0){
+    e.timer=.25+Math.random()*.6;
+    let ds=[[1,0],[-1,0],[0,1],[0,-1]].sort(()=>Math.random()-.5);
+    const dist=Math.abs(player.x-e.x)+Math.abs(player.y-e.y);
+    if(dist<7&&Math.random()<.6)ds.sort((a,b)=>(Math.abs(player.x-e.x-a[0])+Math.abs(player.y-e.y-a[1]))-(Math.abs(player.x-e.x-b[0])+Math.abs(player.y-e.y-b[1])));
+    for(const d of ds){const nx=e.x+d[0],ny=e.y+d[1];if(enemyCanWalk(nx,ny)){e.fx=e.x;e.fy=e.y;e.x=nx;e.y=ny;e.t=0;e.moving=true;break;}}
+   }
+  }
+  if(Math.hypot(e.rx-player.rx,e.ry-player.ry)<.6)hurt();
+ }
+}
+
+// ====================== JEFE FINAL ======================
+function updateBoss(dt){
+ if(!boss)return;const b=boss;b.flash-=dt;
+ if(b.intro>0){b.intro-=dt;if(Math.random()<.5)burst(tc(b.x),tcy(b.y),BE[Math.floor(Math.random()*4)].color,2,150,.6,4);
+  if(b.intro<=0){showBanner('¡EL GUARDIÁN DESPIERTA!','Usa el poder opuesto a su forma','#ff7bd5',2.5);sfx.boss();shake=15;}return;}
+ b.elT-=dt;
+ if(b.elT<=0){b.el=(b.el+1)%4;b.elT=6.5;const E=BE[b.el];burst(tc(b.x),tcy(b.y),E.color,40,260,.8,5);addText(`¡Forma de ${E.name}!`,b.x,b.y-1,E.color);sfx.boss();}
+ const rage=1-b.hp/b.max,dx=player.rx-b.x,dy=player.ry-b.y,d=Math.hypot(dx,dy)||1,sp=(1+rage*1.3)*dt;
+ b.x+=dx/d*sp+b.kx*dt;b.y+=dy/d*sp+b.ky*dt;b.kx*=Math.pow(.02,dt);b.ky*=Math.pow(.02,dt);
+ b.x=Math.max(1,Math.min(COLS-2,b.x));b.y=Math.max(1,Math.min(ROWS-2,b.y));
+ b.shootT-=dt;
+ if(b.shootT<=0){
+  b.shootT=1.9-rage*1.0;const a=Math.atan2(dy,dx),n=rage>.5?3:1;
+  for(let k=0;k<n;k++){const aa=a+(k-(n-1)/2)*.35;orbs.push({x:b.x,y:b.y,vx:Math.cos(aa)*4.2,vy:Math.sin(aa)*4.2,color:BE[b.el].color});}
+  sfx.shoot();
+ }
+ if(Math.hypot(player.rx-b.x,player.ry-b.y)<.85)hurt();
+}
+function hitBoss(pr){
+ const b=boss,E=BE[b.el];
+ if(pr.p===E.weak){
+  b.hp-=prog.bossDmg;b.flash=.2;shake=8;sfx.kill();
+  burst(tc(b.x),tcy(b.y),E.color,30,250,.7,5);addText(`-${prog.bossDmg} ¡Golpe crítico!`,b.x,b.y-1,'#fff');
+  if(b.hp<=0)bossDie();
+ }else if(pr.p===VIENTO){b.kx=pr.dx*8;b.ky=pr.dy*8;addText('¡Empujado!',b.x,b.y-1,'#b8ffcf');}
+ else{addText('¡Inmune!',b.x,b.y-1,'#ccc');sfx.nope();}
+}
+function bossDie(){
+ const bx=boss.x,by=boss.y;
+ for(let k=0;k<4;k++)burst(tc(bx),tcy(by),BE[k].color,50,300+k*60,1.3,6);
+ shake=25;sfx.win();prog.score+=1000;boss=null;orbs=[];
+ let best=null,bd=1e9;
+ for(let y=1;y<ROWS-1;y++)for(let x=1;x<COLS-1;x++){
+  if(grid[y][x]!=='.'||(x===player.x&&y===player.y)||items.some(i=>i.x===x&&i.y===y))continue;
+  const d=Math.hypot(x-bx,y-by);if(d<bd){bd=d;best={x,y};}
+ }
+ grid[best.y][best.x]='E';exitPos=best;
+ showBanner('¡GUARDIÁN DERROTADO!','Entra al portal para terminar tu aventura','#ffe08a',3.5);
+}
+function updateOrbs(dt){
+ for(const o of orbs){
+  o.x+=o.vx*dt;o.y+=o.vy*dt;
+  const t=tileAt(Math.round(o.x),Math.round(o.y));
+  if(t==='#'){o.dead=true;burst(tc(o.x),tcy(o.y),o.color,10,120,.4,3);continue;}
+  if(Math.hypot(o.x-player.rx,o.y-player.ry)<.5){o.dead=true;hurt();}
+ }
+ orbs=orbs.filter(o=>!o.dead);
+}
+
+// ====================== FLUJO DEL JUEGO ======================
+function overlay(html,handlers){
+ ov.innerHTML=html;ov.classList.add('show');
+ ov.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{ac();sfx.click();handlers[b.dataset.act]();});
+}
+function hideOv(){ov.classList.remove('show');ov.innerHTML='';}
+function applyEffect(e,live){
+ if(e.hearts){prog.maxHearts+=e.hearts;if(live)player.hearts+=e.hearts;}
+ if(e.energy){prog.maxEnergy+=e.energy;if(live)player.energy=prog.maxEnergy;}
+ if(e.regen)prog.regen+=e.regen;
+ if(e.speed)prog.speed+=e.speed;
+ if(e.score)prog.score+=e.score;
+ if(e.bossDmg)prog.bossDmg+=e.bossDmg;
+ if(e.power!==undefined&&live)givePower(e.power);
+}
+function titleScreen(){
+ state='title';grid=null;
+ const sv=loadSave();
+ overlay(`<div class="tag">Una aventura elemental</div><h1 class="logo">POWER</h1>
+ <p>Toma las <b>píldoras de poder</b>, domina los elementos y toma <b>decisiones</b> para completar cada misión.</p>
+ <div style="font-size:38px;letter-spacing:12px;margin:6px">🔥💧❄️🌪️⚡⛰️</div>
+ <div class="btns"><button data-act="nw">▶ Nueva partida</button>${sv&&sv.level<LEVELS.length?`<button data-act="ct">⏩ Continuar (Misión ${sv.level+1})</button>`:''}</div>
+ <div class="keys"><kbd>WASD</kbd> / <kbd>Flechas</kbd> mover · <kbd>Espacio</kbd> lanzar poder · <kbd>1</kbd>-<kbd>6</kbd> o <kbd>Q</kbd> <kbd>E</kbd> cambiar poder<br><kbd>R</kbd> reiniciar misión · <kbd>P</kbd> pausa y guía · <kbd>M</kbd> sonido</div>`,
+ {nw:()=>{prog=newProg();goLevel(0);},ct:()=>{prog=sv;goLevel(prog.level);}});
+}
+function goLevel(i){prog.level=i;curLevel=i;if(!prog.decided[i])showDecision(i);else showBriefing(i);}
+function showDecision(i){
+ const L=LEVELS[i],d=L.decision;state='menu';
+ let h=`<div class="tag">Misión ${i+1} de ${LEVELS.length}</div><h2>${L.name}</h2>
+ <div class="box"><span class="mission">🎯 ${L.mission}</span></div>
+ <h2 style="font-size:26px;margin-top:16px;color:#ffb3e6">⚖️ ${d.title}</h2><p>${d.text}</p><div class="btns">`;
+ d.options.forEach((o,k)=>h+=`<button class="opt" data-act="o${k}">${o.label}<small>${o.desc}</small></button>`);
+ h+=`</div><div class="keys">Tu decisión cambiará tu aventura. (Teclas <kbd>1</kbd>-<kbd>${d.options.length}</kbd>)</div>`;
+ const hd={};
+ d.options.forEach((o,k)=>hd['o'+k]=()=>{applyEffect(o.effect,false);prog.choices.push(`Misión ${i+1} · ${d.title}: ${o.label}`);prog.decided[i]=true;showBriefing(i);});
+ overlay(h,hd);
+}
+function showBriefing(i){
+ const L=LEVELS[i];state='menu';
+ overlay(`<div class="tag">Misión ${i+1} de ${LEVELS.length}</div><h2>${L.name}</h2><p>${L.story}</p>
+ <div class="box"><span class="mission">🎯 ${L.mission}</span><p style="font-size:16px">💡 ${L.hint}</p></div>
+ <div class="btns"><button data-act="go">⚔️ ¡Comenzar misión!</button></div>`,{go:()=>beginLevel(i)});
+}
+function beginLevel(i){
+ curLevel=i;prog.level=i;snapshot=JSON.stringify(prog);save();
+ loadLevel(i);hideOv();state='play';dirStack=[];
+ showBanner(LEVELS[i].name,LEVELS[i].mission,'#ffe08a',3);
+}
+function restartLevel(){prog=JSON.parse(snapshot);beginLevel(curLevel);}
+function openAltar(){
+ const a=LEVELS[curLevel].altar;state='menu';dirStack=[];
+ let h=`<h2 style="color:#d59bff">🔮 ${a.title}</h2><p>${a.text}</p><div class="btns">`;
+ a.options.forEach((o,k)=>h+=`<button class="opt" data-act="o${k}">${o.label}<small>${o.desc}</small></button>`);
+ h+='</div>';
+ const hd={};
+ a.options.forEach((o,k)=>hd['o'+k]=()=>{prog.choices.push(`Misión ${curLevel+1} · Altar: ${o.label}`);hideOv();state='play';applyEffect(o.effect,true);
+  if(o.effect.power===undefined){showBanner('¡VIDA Y ENERGÍA!','+1 corazón y +3 de energía máxima','#ff6b8b',3);sfx.power();burst(tc(player.x),tcy(player.y),'#ff6b8b',40,260,1,5);}});
+ overlay(h,hd);
+}
+function levelComplete(){
+ state='menu';sfx.win();
+ for(let k=0;k<4;k++)burst(tc(player.x),tcy(player.y),POWERS[k].color,30,300,1.2,5);
+ const tb=Math.max(0,300-Math.floor(levelTime)*2),hb=player.hearts*50;
+ prog.score+=500+tb+hb;
+ const next=curLevel+1;prog.level=next;save();
+ setTimeout(()=>{
+  if(next>=LEVELS.length){victory();return;}
+  overlay(`<div class="tag">Misión ${curLevel+1} completada</div><h2>🏆 ¡Misión Cumplida!</h2>
+  <div class="box"><p>Misión completada: +500<br>Tiempo (${Math.floor(levelTime)} s): +${tb}<br>Corazones restantes: +${hb}</p>
+  <p style="font-size:26px;color:#ffe08a"><b>Puntos: ${prog.score}</b></p></div>
+  <div class="btns"><button data-act="n">Siguiente misión ➜</button></div>`,{n:()=>goLevel(next)});
+ },900);
+}
+function gameOver(){
+ state='menu';
+ setTimeout(()=>overlay(`<h2 style="color:#ff6b8b">💀 ¡Has caído!</h2><p>Los elementos fueron demasiado fuertes esta vez... ¡pero un héroe nunca se rinde!</p>
+ <div class="btns"><button data-act="r">🔄 Reintentar misión</button><button data-act="m">🏠 Menú</button></div>`,
+ {r:()=>restartLevel(),m:()=>titleScreen()}),700);
+}
+function victory(){
+ try{localStorage.removeItem('power_save');}catch(e){}
+ overlay(`<h1 class="logo" style="font-size:80px">POWER</h1><h2>👑 ¡Eres el Maestro de los Elementos!</h2>
+ <p>Derrotaste al Guardián Elemental y salvaste el mundo.</p>
+ <div class="box"><p style="font-size:28px;color:#ffe08a;margin:4px"><b>Puntuación final: ${prog.score}</b></p>
+ <div class="tag" style="margin-top:6px">Tus decisiones</div><ul class="choices">${prog.choices.map(c=>`<li>${c}</li>`).join('')}</ul></div>
+ <div class="btns"><button data-act="a">🔁 Jugar otra vez</button></div>`,{a:()=>titleScreen()});
+}
+function pauseGame(){
+ state='pause';dirStack=[];
+ overlay(`<h2>⏸ Pausa · Guía de poderes</h2><div class="box"><table class="guide">
+ <tr><td>🧊 Bloque de hielo · 🌿 Enredadera</td><td>➜ 🔥 Fuego</td></tr>
+ <tr><td>🔥 Llamas</td><td>➜ 💧 Agua</td></tr>
+ <tr><td>🌊 Agua profunda</td><td>➜ ❄️ Hielo (crea puente)</td></tr>
+ <tr><td>⚪ Roca y ⚫ Agujero</td><td>➜ 🌪️ Viento empuja la roca al agujero</td></tr>
+ <tr><td>🧱 Muro agrietado · ⚫ Agujero</td><td>➜ ⛰️ Tierra</td></tr>
+ <tr><td>🔌 Generador</td><td>➜ ⚡ Rayo (abre las puertas eléctricas)</td></tr>
+ <tr><td>🔴 Slime de Fuego</td><td>➜ 💧 Agua</td></tr>
+ <tr><td>🔵 Slime de Hielo</td><td>➜ 🔥 Fuego</td></tr>
+ <tr><td>👻 Fantasma</td><td>➜ 🌪️ Viento o ⚡ Rayo</td></tr>
+ </table></div>
+ <div class="btns"><button data-act="c">▶ Continuar</button><button data-act="r">🔄 Reiniciar misión</button><button data-act="m">🏠 Menú</button></div>`,
+ {c:()=>resume(),r:()=>restartLevel(),m:()=>titleScreen()});
+}
+function resume(){hideOv();state='play';}
+
+// ====================== TECLADO ======================
+addEventListener('keydown',e=>{
+ if(DIRS[e.code]){e.preventDefault();if(!dirStack.includes(e.code))dirStack.push(e.code);}
+ if(e.code==='Space'){e.preventDefault();}
+ if(e.code==='KeyM'){muted=!muted;return;}
+ if(ov.classList.contains('show')){
+  const opts=ov.querySelectorAll('button.opt');
+  if(/^Digit[1-9]$/.test(e.code)&&opts.length){const b=opts[+e.code[5]-1];if(b)b.click();return;}
+  if(e.code==='Enter'){const b=ov.querySelector('button:not(.opt)');if(b)b.click();return;}
+  if(state==='pause'&&(e.code==='KeyP'||e.code==='Escape'))resume();
+  return;
+ }
+ if(state!=='play')return;
+ if(e.code==='Space'||e.code==='KeyJ')cast();
+ if(/^Digit[1-6]$/.test(e.code))selectPower(+e.code[5]-1);
+ if(e.code==='KeyE')cyclePower(1);
+ if(e.code==='KeyQ')cyclePower(-1);
+ if(e.code==='KeyR')restartLevel();
+ if(e.code==='KeyP'||e.code==='Escape')pauseGame();
+});
+addEventListener('keyup',e=>{dirStack=dirStack.filter(c=>c!==e.code);});
+addEventListener('blur',()=>{dirStack=[];});
+
+// ====================== DIBUJO ======================
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function glow(x,y,r,color,a){
+ const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,color);g.addColorStop(1,'rgba(0,0,0,0)');
+ ctx.save();ctx.globalAlpha=Math.max(0,Math.min(1,a));ctx.globalCompositeOperation='lighter';ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2);ctx.restore();}
+function drawFloor(px,py,x,y){
+ ctx.fillStyle=((x+y)&1)?'#1b1530':'#1e1736';ctx.fillRect(px,py,T,T);
+ const h=((x*73856093)^(y*19349663))>>>0;
+ if(h%4===0){ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(px+(h%30)+6,py+((h>>5)%30)+6,3,3);}
+}
+function drawWall(px,py,x,y){
+ ctx.fillStyle='#2a2148';ctx.fillRect(px,py,T,T);
+ ctx.fillStyle='#3d3170';ctx.fillRect(px+2,py+2,T-4,T/2-3);ctx.fillRect(px+2,py+T/2+1,T-4,T/2-3);
+ ctx.fillStyle='#5244a0';ctx.fillRect(px+2,py+2,T-4,3);ctx.fillRect(px+2,py+T/2+1,T-4,3);
+ ctx.fillStyle='#2a2148';ctx.fillRect(px+((x+y)%2?T/3:2*T/3),py+2,3,T/2-3);ctx.fillRect(px+((x+y)%2?2*T/3:T/3),py+T/2+1,3,T/2-3);
+}
+function flame(cx,base,w,h){
+ const g=ctx.createLinearGradient(0,base,0,base-h);g.addColorStop(0,'#ff3d00');g.addColorStop(.5,'#ff9a00');g.addColorStop(1,'#fff176');
+ ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(cx-w/2,base);ctx.quadraticCurveTo(cx-w/2,base-h*.55,cx,base-h);ctx.quadraticCurveTo(cx+w/2,base-h*.55,cx+w/2,base);ctx.closePath();ctx.fill();}
+function drawTile(t,x,y){
+ const px=x*T,py=y*T+HUD,cx=px+T/2,cy=py+T/2;
+ if(t==='#'){drawWall(px,py,x,y);return;}
+ if(t==='C'){drawWall(px,py,x,y);ctx.strokeStyle='#120c24';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(cx-4,py+3);ctx.lineTo(cx+3,cy-6);ctx.lineTo(cx-6,cy+4);ctx.lineTo(cx+5,py+T-4);ctx.moveTo(cx+3,cy-6);ctx.lineTo(px+T-6,cy-2);ctx.stroke();ctx.strokeStyle='rgba(196,138,74,.7)';ctx.lineWidth=1;ctx.stroke();ctx.lineWidth=1;return;}
+ drawFloor(px,py,x,y);
+ switch(t){
+ case 'i':
+  ctx.fillStyle='rgba(170,240,255,.5)';ctx.fillRect(px,py,T,T);
+  ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(px+8,py+T-10);ctx.lineTo(px+18,py+10);ctx.moveTo(px+24,py+T-8);ctx.lineTo(px+32,py+20);ctx.stroke();ctx.lineWidth=1;break;
+ case 'W':{
+  const g=ctx.createLinearGradient(0,py,0,py+T);g.addColorStop(0,'#1564c9');g.addColorStop(1,'#0b3a86');ctx.fillStyle=g;ctx.fillRect(px,py,T,T);
+  ctx.strokeStyle='rgba(150,215,255,.55)';ctx.lineWidth=2;
+  for(let k=0;k<3;k++){ctx.beginPath();const yy=py+9+k*15;for(let i=0;i<=T;i+=4){const yv=yy+Math.sin((i+px)*.13+time*3+k*2)*2.5;i===0?ctx.moveTo(px+i,yv):ctx.lineTo(px+i,yv);}ctx.stroke();}
+  ctx.lineWidth=1;break;}
+ case 'I':{
+  glow(cx,cy,34,'#7fdcff',.25);
+  const g=ctx.createLinearGradient(px,py,px+T,py+T);g.addColorStop(0,'#d8f8ff');g.addColorStop(.5,'#7fdcff');g.addColorStop(1,'#3fa6d8');
+  ctx.fillStyle=g;rr(px+3,py+3,T-6,T-6,7);ctx.fill();ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.8)';ctx.beginPath();ctx.moveTo(px+10,py+14);ctx.lineTo(px+18,py+9);ctx.moveTo(px+10,py+22);ctx.lineTo(px+24,py+12);ctx.stroke();ctx.lineWidth=1;break;}
+ case 'F':
+  glow(cx,cy,T,'#ff6a00',.55+.1*Math.sin(time*9+x));
+  for(let k=0;k<3;k++){const h=20+Math.sin(time*12+k*2.1+x*3)*6+(k===1?10:0);flame(px+12+k*12,py+T-5,14,h);}
+  if(Math.random()<.15)particles.push({x:cx+(Math.random()-.5)*30,y:py+10,vx:0,vy:-50,life:.5,max:.5,color:'#ffb347',size:2,grav:0});
+  break;
+ case 'V':
+  ctx.fillStyle='#1d4a22';rr(px+2,py+2,T-4,T-4,6);ctx.fill();
+  ctx.strokeStyle='#3fae4a';ctx.lineWidth=4;
+  for(let k=0;k<3;k++){ctx.beginPath();ctx.moveTo(px+10+k*14,py+2);ctx.bezierCurveTo(px+2+k*14,py+16,px+20+k*14,py+30,px+8+k*14,py+T-2);ctx.stroke();}
+  ctx.fillStyle='#6ee06a';for(let k=0;k<6;k++){ctx.beginPath();ctx.ellipse(px+8+(k*13)%34,py+8+k*7,5,3,k,0,7);ctx.fill();}
+  ctx.lineWidth=1;break;
+ case 'H':{
+  const g=ctx.createRadialGradient(cx,cy,2,cx,cy,T*.7);g.addColorStop(0,'#000');g.addColorStop(.7,'#05020c');g.addColorStop(1,'#1b1530');
+  ctx.fillStyle=g;ctx.fillRect(px,py,T,T);ctx.strokeStyle='rgba(120,90,200,.25)';ctx.strokeRect(px+4,py+4,T-8,T-8);break;}
+ case 'G':case 'A':{
+  const on=t==='A';
+  if(on)glow(cx,cy,44,'#ffe53b',.5+.2*Math.sin(time*10));
+  ctx.fillStyle=on?'#6b6a3a':'#4a4d63';rr(px+5,py+5,T-10,T-10,8);ctx.fill();
+  ctx.strokeStyle=on?'#ffe53b':'#8a8fb0';ctx.lineWidth=3;ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle=on?'#fff7b0':'#8a8fb0';ctx.beginPath();ctx.moveTo(cx+3,py+11);ctx.lineTo(cx-8,cy+3);ctx.lineTo(cx,cy+1);ctx.lineTo(cx-4,py+T-11);ctx.lineTo(cx+9,cy-3);ctx.lineTo(cx+1,cy-1);ctx.closePath();ctx.fill();
+  if(on&&Math.random()<.1)burst(cx,cy,'#ffe53b',3,120,.3,2);break;}
+ case 'D':
+  ctx.fillStyle='#3a3a52';ctx.fillRect(px,py,7,T);ctx.fillRect(px+T-7,py,7,T);
+  glow(cx,cy,30,'#ffe53b',.3);
+  for(let k=0;k<4;k++){const a=.5+.5*Math.sin(time*18+k*1.7);ctx.strokeStyle=`rgba(255,230,60,${a})`;ctx.lineWidth=2;ctx.beginPath();const bx=px+12+k*8;ctx.moveTo(bx,py);for(let s=1;s<=6;s++)ctx.lineTo(bx+((s+k)%2?3:-3),py+s*8);ctx.stroke();}
+  ctx.lineWidth=1;break;
+ case 'd':
+  ctx.fillStyle='#2e2e44';ctx.fillRect(px,py,5,T);ctx.fillRect(px+T-5,py,5,T);break;
+ case 'E':
+  if(exitOpen()){
+   glow(cx,cy,56,'#c06bff',.75);
+   for(let k=0;k<3;k++){ctx.strokeStyle=`hsl(${(time*140+k*120)%360},100%,68%)`;ctx.lineWidth=4;ctx.beginPath();ctx.arc(cx,cy,7+k*6,time*(3+k)+k,time*(3+k)+k+4.2);ctx.stroke();}
+   ctx.lineWidth=1;if(Math.random()<.3)particles.push({x:cx,y:cy,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*120,life:.6,max:.6,color:`hsl(${Math.random()*360},100%,70%)`,size:3,grav:0});
+  }else{
+   ctx.strokeStyle='#4a4370';ctx.lineWidth=4;ctx.beginPath();ctx.arc(cx,cy,17,0,7);ctx.stroke();ctx.lineWidth=1;
+   ctx.font='18px Segoe UI Emoji';ctx.fillText('🔒',cx,cy+1);
+  }
+  break;
+ }
+}
+function drawStar(cx,cy,r1,r2,rot,c1,c2){
+ ctx.beginPath();for(let i=0;i<10;i++){const r=i%2?r2:r1,a=rot+i*Math.PI/5-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);}ctx.closePath();
+ const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r1);g.addColorStop(0,c1);g.addColorStop(1,c2);ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#fff6c0';ctx.lineWidth=1.5;ctx.stroke();ctx.lineWidth=1;}
+function drawItems(){
+ for(const it of items){
+  const cx=tc(it.x),cy=tcy(it.y)+Math.sin(time*3+it.x)*3;
+  if(it.type==='star'){glow(cx,cy,32,'#ffd23b',.55);drawStar(cx,cy,13,6,Math.sin(time*2+it.y)*.4,'#fff6a0','#ffb300');}
+  else if(it.type==='pill'){
+   const P=POWERS[it.p];glow(cx,cy,40,P.color,.6+.2*Math.sin(time*5));
+   ctx.save();ctx.translate(cx,cy);ctx.rotate(-.6+Math.sin(time*2)*.25);
+   rr(-15,-7,30,14,7);ctx.save();ctx.clip();ctx.fillStyle='#fff';ctx.fillRect(-15,-7,30,14);ctx.fillStyle=P.color;ctx.fillRect(-15,-7,15,14);
+   ctx.fillStyle='rgba(255,255,255,.6)';ctx.fillRect(-11,-5,22,3);ctx.restore();
+   rr(-15,-7,30,14,7);ctx.strokeStyle='rgba(0,0,0,.4)';ctx.stroke();ctx.restore();
+   ctx.font='15px Segoe UI Emoji';ctx.fillText(P.icon,cx,cy-22);
+   if(Math.random()<.2)particles.push({x:cx+(Math.random()-.5)*20,y:cy+(Math.random()-.5)*20,vx:0,vy:-30,life:.6,max:.6,color:P.color,size:3,grav:0});
+  }else if(it.type==='altar'){
+   const bx=tc(it.x),by=tcy(it.y);
+   glow(bx,by-6,44,'#c06bff',.5+.15*Math.sin(time*4));
+   ctx.fillStyle='#5b4a8a';rr(bx-15,by,30,16,3);ctx.fill();ctx.fillStyle='#7a66b5';ctx.fillRect(bx-17,by-2,34,5);
+   for(let k=0;k<2;k++){const a=time*2.5+k*Math.PI;ctx.fillStyle=k?'#ff6b8b':'#c48a4a';ctx.beginPath();ctx.arc(bx+Math.cos(a)*16,by-12+Math.sin(a)*5,5,0,7);ctx.fill();}
+   ctx.font='bold 22px Segoe UI';ctx.fillStyle='#f0d9ff';ctx.fillText('?',bx,by-13+Math.sin(time*3)*2);
+  }
+ }
+}
+function drawBoulders(){
+ for(const b of boulders){
+  const cx=tc(b.rx),cy=tcy(b.ry),s=b.falling&&b.fs!==undefined?Math.max(0,b.fs):1;
+  ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(cx,cy+16,16*s,5*s,0,0,7);ctx.fill();
+  const g=ctx.createRadialGradient(cx-6,cy-7,2,cx,cy,20*s);g.addColorStop(0,'#c9bfb1');g.addColorStop(1,'#5c544a');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,19*s,0,7);ctx.fill();
+  ctx.strokeStyle='rgba(40,30,25,.6)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx-8*s,cy-2*s);ctx.lineTo(cx,cy+3*s);ctx.lineTo(cx+7*s,cy-5*s);ctx.stroke();ctx.lineWidth=1;
+ }
+}
+function drawEnemies(){
+ for(const e of enemies){
+  if(!e.alive)continue;
+  const cx=tc(e.rx),cy=tcy(e.ry);
+  if(e.type==='g'){
+   const y=cy+Math.sin(time*3+e.id)*4;glow(cx,y,34,'#9a5cff',.4);
+   ctx.globalAlpha=.88;ctx.fillStyle=e.flash>0?'#fff':'#b98cff';ctx.beginPath();ctx.arc(cx,y-4,15,Math.PI,0);ctx.lineTo(cx+15,y+14);
+   for(let k=0;k<4;k++){const xx=cx+15-(k+1)*7.5;ctx.quadraticCurveTo(xx+3.75,y+(k%2?8:20)+Math.sin(time*8+k)*2,xx,y+14);}
+   ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+   ctx.fillStyle='#1a0b33';ctx.beginPath();ctx.ellipse(cx-5,y-5,3,5,0,0,7);ctx.ellipse(cx+5,y-5,3,5,0,0,7);ctx.fill();
+   ctx.beginPath();ctx.ellipse(cx,y+4,3,2,0,0,7);ctx.fill();
+  }else{
+   const fire=e.type==='r',c=fire?['#ff6a3d','#b8240c']:['#7fe0ff','#1b7fc4'];
+   const s=Math.sin(time*7+e.id)*.12,w=17*(1+s),h=17*(1-s),base=cy+16;
+   glow(cx,cy,36,c[0],.4);
+   ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(cx,base,w,4,0,0,7);ctx.fill();
+   const g=ctx.createRadialGradient(cx-5,base-h,2,cx,base-h*.6,w*1.2);g.addColorStop(0,e.flash>0?'#fff':'#ffffff');g.addColorStop(.25,e.flash>0?'#fff':c[0]);g.addColorStop(1,c[1]);
+   ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(cx,base,w,h*1.5,0,Math.PI,0);ctx.closePath();ctx.fill();
+   if(fire){flame(cx,base-h*1.4,10,10+Math.sin(time*14+e.id)*4);}
+   else{ctx.fillStyle='#e6fdff';for(let k=-1;k<=1;k++){ctx.beginPath();ctx.moveTo(cx+k*8-3,base-h*1.35);ctx.lineTo(cx+k*8,base-h*1.35-9+Math.abs(k)*3);ctx.lineTo(cx+k*8+3,base-h*1.35);ctx.fill();}}
+   const ey=base-h*.8,lx=Math.sign(player.rx-e.rx)*2;
+   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx-6,ey,4.5,0,7);ctx.arc(cx+6,ey,4.5,0,7);ctx.fill();
+   ctx.fillStyle='#111';ctx.beginPath();ctx.arc(cx-6+lx,ey+1,2.2,0,7);ctx.arc(cx+6+lx,ey+1,2.2,0,7);ctx.fill();
+  }
+ }
+}
+function drawBoss(){
+ if(!boss)return;const b=boss,E=BE[b.el],cx=tc(b.x),cy=tcy(b.y);
+ const sc=b.intro>0?Math.max(.05,1-b.intro/2.5):1,r=(30+Math.sin(time*4)*2)*sc;
+ glow(cx,cy,120*sc,E.color,.55);
+ for(let k=0;k<8;k++){const a=time*2+k*Math.PI/4,rr2=(44+Math.sin(time*3+k)*4)*sc;ctx.fillStyle=k%2?E.color:'#fff';ctx.beginPath();ctx.arc(cx+Math.cos(a)*rr2,cy+Math.sin(a)*rr2*.6,4*sc,0,7);ctx.fill();}
+ const g=ctx.createRadialGradient(cx-8,cy-10,3,cx,cy,r);g.addColorStop(0,'#ffffff');g.addColorStop(.35,E.color);g.addColorStop(1,'#1a0b33');
+ ctx.fillStyle=b.flash>0?'#ffffff':g;ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.fill();
+ ctx.fillStyle='#1a0b33';ctx.beginPath();ctx.moveTo(cx-16*sc,cy-8*sc);ctx.lineTo(cx-4*sc,cy-3*sc);ctx.lineTo(cx-14*sc,cy+2*sc);ctx.fill();
+ ctx.beginPath();ctx.moveTo(cx+16*sc,cy-8*sc);ctx.lineTo(cx+4*sc,cy-3*sc);ctx.lineTo(cx+14*sc,cy+2*sc);ctx.fill();
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx-10*sc,cy-3*sc,2.5*sc,0,7);ctx.arc(cx+10*sc,cy-3*sc,2.5*sc,0,7);ctx.fill();
+ ctx.strokeStyle='#1a0b33';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy+16*sc,9*sc,Math.PI*1.15,Math.PI*1.85);ctx.stroke();ctx.lineWidth=1;
+ if(b.intro<=0){
+  const w=420,x0=cv.width/2-w/2,y0=HUD+10;
+  ctx.fillStyle='rgba(0,0,0,.6)';rr(x0-4,y0-4,w+8,30,8);ctx.fill();
+  ctx.fillStyle='#3a1030';ctx.fillRect(x0,y0+10,w,12);
+  ctx.fillStyle=E.color;ctx.fillRect(x0,y0+10,w*Math.max(0,b.hp)/b.max,12);
+  ctx.font='bold 12px Segoe UI';ctx.fillStyle='#fff';ctx.fillText(`GUARDIÁN ELEMENTAL · Forma de ${E.name.toUpperCase()}`,cv.width/2,y0+3);
+ }
+}
+function drawPlayer(){
+ const p=player,cx=tc(p.rx),cy=tcy(p.ry),P=p.power>=0?POWERS[p.power]:null,col=P?P.color:'#9a8cff';
+ glow(cx,cy,48,col,.35+.1*Math.sin(time*4));
+ if(p.inv>0&&Math.floor(time*16)%2===0)return;
+ const bob=p.moving?-Math.abs(Math.sin(p.t*Math.PI))*4:Math.sin(time*3)*1.5,y=cy+bob,[dx,dy]=p.dir;
+ ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(cx,cy+19,13,5,0,0,7);ctx.fill();
+ if(dy>=0){ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx-10,y-4);ctx.lineTo(cx+10,y-4);ctx.lineTo(cx+14-dx*6+Math.sin(time*8)*2,y+17);ctx.lineTo(cx-14-dx*6+Math.sin(time*8+1)*2,y+17);ctx.closePath();ctx.fill();}
+ ctx.fillStyle='#2a2f7a';rr(cx-9,y-6,18,21,6);ctx.fill();
+ ctx.fillStyle=col;ctx.fillRect(cx-9,y+5,18,3);
+ ctx.fillStyle='#ffd7b0';ctx.beginPath();ctx.arc(cx,y-13,11,0,7);ctx.fill();
+ ctx.fillStyle='#3b2416';ctx.beginPath();ctx.arc(cx,y-15,11.5,Math.PI,0);ctx.fill();
+ if(dy<0){ctx.beginPath();ctx.arc(cx,y-13,11,0,7);ctx.fill();}
+ ctx.fillStyle=col;ctx.fillRect(cx-11.5,y-18,23,4);
+ if(dy<0){ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx-10,y-4);ctx.lineTo(cx+10,y-4);ctx.lineTo(cx+13+Math.sin(time*8)*2,y+17);ctx.lineTo(cx-13+Math.sin(time*8+1)*2,y+17);ctx.closePath();ctx.fill();}
+ else{
+  const ex=dx*4;ctx.fillStyle='#fff';ctx.beginPath();ctx.ellipse(cx-4+ex,y-11,3,3.5,0,0,7);ctx.ellipse(cx+4+ex,y-11,3,3.5,0,0,7);ctx.fill();
+  ctx.fillStyle='#1a1030';ctx.beginPath();ctx.arc(cx-4+ex*1.3,y-10.5,1.8,0,7);ctx.arc(cx+4+ex*1.3,y-10.5,1.8,0,7);ctx.fill();
+ }
+}
+function drawProjectiles(){
+ for(const pr of projectiles){
+  const x=tc(pr.x),y=tcy(pr.y),c=POWERS[pr.p].color;
+  glow(x,y,30,c,.9);
+  ctx.save();ctx.translate(x,y);
+  switch(pr.p){
+   case FUEGO:ctx.rotate(Math.atan2(pr.dy,pr.dx)+Math.PI/2);flame(0,10,16,26+Math.sin(time*30)*4);break;
+   case AGUA:ctx.rotate(Math.atan2(pr.dy,pr.dx)-Math.PI/2);ctx.fillStyle='#5aa8ff';ctx.beginPath();ctx.arc(0,0,8,0,Math.PI);ctx.lineTo(0,-16);ctx.closePath();ctx.fill();ctx.fillStyle='#cfe9ff';ctx.beginPath();ctx.arc(-3,2,2.5,0,7);ctx.fill();break;
+   case HIELO:ctx.rotate(time*12);ctx.fillStyle='#e6fdff';ctx.strokeStyle='#7fdcff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-12);ctx.lineTo(6,0);ctx.lineTo(0,12);ctx.lineTo(-6,0);ctx.closePath();ctx.fill();ctx.stroke();break;
+   case VIENTO:ctx.strokeStyle='#e9fff0';ctx.lineWidth=3;for(let k=0;k<3;k++){ctx.beginPath();ctx.arc(0,0,5+k*5,time*15+k*2,time*15+k*2+3.5);ctx.stroke();}break;
+   case RAYO:ctx.strokeStyle='#fff7b0';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-pr.dx*18,-pr.dy*18);for(let k=1;k<=4;k++){const j=(Math.random()-.5)*12;ctx.lineTo(-pr.dx*18+pr.dx*9*k+pr.dy*j,-pr.dy*18+pr.dy*9*k+pr.dx*j);}ctx.stroke();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,0,5,0,7);ctx.fill();break;
+   case TIERRA:ctx.rotate(time*10);ctx.fillStyle='#a8743c';ctx.beginPath();ctx.moveTo(-9,-6);ctx.lineTo(4,-10);ctx.lineTo(10,2);ctx.lineTo(2,10);ctx.lineTo(-10,5);ctx.closePath();ctx.fill();ctx.strokeStyle='#5a3a1a';ctx.lineWidth=2;ctx.stroke();break;
+  }
+  ctx.restore();ctx.lineWidth=1;
+ }
+ for(const o of orbs){const x=tc(o.x),y=tcy(o.y);glow(x,y,26,o.color,.8);ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fill();ctx.strokeStyle=o.color;ctx.lineWidth=3;ctx.stroke();ctx.lineWidth=1;}
+}
+function drawParticles(){
+ ctx.save();ctx.globalCompositeOperation='lighter';
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life/p.max);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size*(.4+.6*p.life/p.max),0,7);ctx.fill();}
+ ctx.restore();
+}
+function drawTexts(){
+ for(const t of texts){ctx.globalAlpha=Math.min(1,t.life*1.5);ctx.font='bold 17px Segoe UI';ctx.lineWidth=4;ctx.strokeStyle='rgba(0,0,0,.8)';ctx.strokeText(t.str,t.x,t.y);ctx.fillStyle=t.color;ctx.fillText(t.str,t.x,t.y);}
+ ctx.globalAlpha=1;ctx.lineWidth=1;
+}
+function drawHUD(){
+ const g=ctx.createLinearGradient(0,0,0,HUD);g.addColorStop(0,'#160f33');g.addColorStop(1,'#0c0820');ctx.fillStyle=g;ctx.fillRect(0,0,cv.width,HUD);
+ ctx.fillStyle='rgba(160,120,255,.4)';ctx.fillRect(0,HUD-2,cv.width,2);
+ ctx.textAlign='left';
+ ctx.font='22px Segoe UI Symbol';
+ for(let i=0;i<prog.maxHearts;i++){ctx.fillStyle=i<player.hearts?'#ff3b5c':'#3a2f4a';ctx.fillText('♥',14+i*24,22);}
+ const ew=200,ex=14,ey=42;
+ ctx.fillStyle='#231a45';rr(ex,ey,ew,14,7);ctx.fill();
+ const P=player.power>=0?POWERS[player.power]:null,ec=P?P.color:'#7d5cff';
+ ctx.fillStyle=ec;rr(ex,ey,Math.max(14,ew*player.energy/prog.maxEnergy),14,7);ctx.fill();
+ ctx.font='bold 11px Segoe UI';ctx.fillStyle='#fff';ctx.fillText(`ENERGÍA ${Math.floor(player.energy)}/${prog.maxEnergy}`,ex+8,ey+8);
+ ctx.textAlign='center';
+ const sx=cv.width/2-(6*54)/2;
+ for(let i=0;i<6;i++){
+  const bx=sx+i*54,by=10,own=prog.powers.includes(i),cur=player.power===i,Pw=POWERS[i];
+  if(cur)glow(bx+23,by+23,40,Pw.color,.7);
+  ctx.fillStyle=own?'#2a1d5c':'#15102a';rr(bx,by,46,46,9);ctx.fill();
+  ctx.strokeStyle=cur?'#fff':own?Pw.color:'#2f2650';ctx.lineWidth=cur?3:2;ctx.stroke();ctx.lineWidth=1;
+  ctx.globalAlpha=own?1:.3;ctx.font='24px Segoe UI Emoji';ctx.fillText(own?Pw.icon:'?',bx+23,by+25);ctx.globalAlpha=1;
+  ctx.font='bold 10px Segoe UI';ctx.fillStyle='#b9a8ff';ctx.fillText(i+1,bx+7,by+8);
+ }
+ if(P){ctx.font='bold 11px Segoe UI';ctx.fillStyle=P.color;ctx.fillText(P.name.toUpperCase(),cv.width/2,HUD-6);}
+ ctx.textAlign='right';
+ ctx.font='bold 15px Segoe UI';ctx.fillStyle='#ffe08a';ctx.fillText(`Misión ${curLevel+1}: ${LEVELS[curLevel].name}`,cv.width-14,20);
+ ctx.font='bold 16px Segoe UI';ctx.fillStyle='#fff';
+ const obj=boss?'⚔️ Derrota al Guardián':starsTotal?`⭐ ${starsGot}/${starsTotal}`:'🌀 ¡Al portal!';
+ ctx.fillText(`${obj}    🏆 ${prog.score}${muted?'   🔇':''}`,cv.width-14,46);
+ ctx.textAlign='center';
+}
+function drawBanner(){
+ if(!banner)return;
+ const a=Math.min(1,banner.life*2,(banner.max-banner.life)*4);
+ ctx.globalAlpha=a;const y=HUD+ROWS*T/2;
+ const g=ctx.createLinearGradient(0,0,cv.width,0);g.addColorStop(0,'rgba(5,3,20,0)');g.addColorStop(.5,'rgba(5,3,20,.85)');g.addColorStop(1,'rgba(5,3,20,0)');
+ ctx.fillStyle=g;ctx.fillRect(0,y-55,cv.width,100);
+ ctx.shadowColor=banner.color;ctx.shadowBlur=25;ctx.font='bold 40px Segoe UI';ctx.fillStyle=banner.color;ctx.fillText(banner.title,cv.width/2,y-15);
+ ctx.shadowBlur=0;ctx.font='18px Segoe UI';ctx.fillStyle='#e4dcff';ctx.fillText(banner.sub,cv.width/2,y+22);
+ ctx.globalAlpha=1;
+}
+let vign=null;
+function render(){
+ ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.save();
+ if(shake>0)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
+ ctx.fillStyle='#07041a';ctx.fillRect(-30,-30,cv.width+60,cv.height+60);
+ if(grid){
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)drawTile(grid[y][x],x,y);
+  drawItems();drawBoulders();drawEnemies();drawPlayer();drawBoss();drawProjectiles();
+ }
+ drawParticles();drawTexts();
+ if(!vign){vign=ctx.createRadialGradient(cv.width/2,HUD+ROWS*T/2,ROWS*T*.35,cv.width/2,HUD+ROWS*T/2,cv.width*.65);vign.addColorStop(0,'rgba(0,0,0,0)');vign.addColorStop(1,'rgba(0,0,0,.5)');}
+ ctx.fillStyle=vign;ctx.fillRect(0,HUD,cv.width,ROWS*T);
+ ctx.restore();
+ if(grid&&player){drawHUD();drawBanner();}
+}
+
+// ====================== BUCLE PRINCIPAL ======================
+function update(dt){
+ time+=dt;
+ for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=p.grav*dt;p.vx*=.98;}
+ particles=particles.filter(p=>p.life>0);
+ if(particles.length>1500)particles.splice(0,particles.length-1500);
+ for(const t of texts){t.life-=dt;t.y-=30*dt;}
+ texts=texts.filter(t=>t.life>0);
+ shake=Math.max(0,shake-dt*40);
+ if(banner){banner.life-=dt;if(banner.life<=0)banner=null;}
+ if(!grid){
+  if(Math.random()<.6){const c=POWERS[Math.floor(Math.random()*6)].color;particles.push({x:Math.random()*cv.width,y:cv.height+10,vx:(Math.random()-.5)*30,vy:-60-Math.random()*90,life:5,max:5,color:c,size:3+Math.random()*4,grav:0});}
+  return;
+ }
+ if(state!=='play')return;
+ levelTime+=dt;castCD-=dt;player.inv-=dt;
+ player.energy=Math.min(prog.maxEnergy,player.energy+dt*.75*prog.regen);
+ updatePlayer(dt);
+ if(state!=='play')return;
+ updateBoulders(dt);updateEnemies(dt);updateBoss(dt);updateProjectiles(dt);updateOrbs(dt);
+ auraT-=dt;
+ if(auraT<=0&&player.power>=0){auraT=.06;particles.push({x:tc(player.rx)+(Math.random()-.5)*26,y:tcy(player.ry)+14,vx:0,vy:-40-Math.random()*30,life:.6,max:.6,color:POWERS[player.power].color,size:2.5,grav:0});}
+}
+let last=performance.now();
+function loop(now){
+ const dt=Math.min(.05,(now-last)/1000);last=now;
+ update(dt);render();
+ requestAnimationFrame(loop);
+}
+titleScreen();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
